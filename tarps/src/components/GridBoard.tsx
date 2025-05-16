@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, Typography, Box, Button } from '@mui/material';
 
-// Define the possible states/colors for each cell
-const STATES = [
-  { label: 'Empty', color: '#fff' },
-  { label: 'Sleep', color: '#b39ddb' },
-  { label: 'Wasted', color: '#ef9a9a' },
-  { label: 'Productive', color: '#a5d6a7' },
-  { label: 'Unavoidable', color: '#90caf9' },
-];
+interface State {
+  label: string;
+  color: string;
+}
+
+interface GridBoardProps {
+  states: State[];
+  selectedState: number;
+}
 
 // 12x12 grid: 4 quadrants, 6 hours per quadrant, 6 intervals per hour (10-min)
 const GRID_SIZE = 12;
@@ -40,23 +41,67 @@ function getHourAndMinute(row: number, col: number): { hour: number, minute: num
   }
   // Quadrant IV (bottom-right): row 6-11, col 6-11 => 18:00-23:50
   if (row >= MID && col >= MID) {
-    const hour = 23 - (col - MID);
+    const hour = 23 - (row - MID);
     return { hour, minute };
   }
   // Fallback
   return { hour: 0, minute: 0 };
 }
 
-const GridBoard: React.FC = () => {
+const GridBoard: React.FC<GridBoardProps> = ({ states, selectedState }) => {
   const [grid, setGrid] = useState<number[][]>(createInitialGrid());
+  const [isDragging, setIsDragging] = useState(false);
+  const dragRef = useRef<{ [key: string]: boolean }>({}); // To avoid redundant updates
 
-  // Handle cell click: cycle to next state (will change to legend-driven in next step)
-  const handleCellClick = (row: number, col: number) => {
+  // Mark a cell with the selected state
+  const markCell = (row: number, col: number) => {
+    const key = `${row},${col}`;
+    if (dragRef.current[key]) return; // Already marked in this drag
     setGrid(prev => {
       const newGrid = prev.map(r => [...r]);
-      newGrid[row][col] = (newGrid[row][col] + 1) % STATES.length;
+      newGrid[row][col] = selectedState;
       return newGrid;
     });
+    dragRef.current[key] = true;
+  };
+
+  // Mouse events
+  const handleMouseDown = (row: number, col: number) => {
+    setIsDragging(true);
+    dragRef.current = {};
+    markCell(row, col);
+  };
+  const handleMouseEnter = (row: number, col: number) => {
+    if (isDragging) markCell(row, col);
+  };
+  const handleMouseUp = () => {
+    setIsDragging(false);
+    dragRef.current = {};
+  };
+
+  // Touch events
+  const handleTouchStart = (row: number, col: number, e: React.TouchEvent) => {
+    setIsDragging(true);
+    dragRef.current = {};
+    markCell(row, col);
+    e.preventDefault();
+  };
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return;
+    const touch = e.touches[0];
+    const target = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!target) return;
+    const cell = (target as HTMLElement).closest('[data-row][data-col]') as HTMLElement | null;
+    if (cell) {
+      const row = Number(cell.getAttribute('data-row'));
+      const col = Number(cell.getAttribute('data-col'));
+      markCell(row, col);
+    }
+    e.preventDefault();
+  };
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+    dragRef.current = {};
   };
 
   // Render hour labels for the left and right
@@ -120,7 +165,14 @@ const GridBoard: React.FC = () => {
       <CardContent>
         <Typography variant="h6" gutterBottom>24-Hour Quadrant Grid</Typography>
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', margin: 0 }}>
+          <table
+            style={{ borderCollapse: 'collapse', margin: 0 }}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+          >
             <thead>{renderMinuteLabels('top')}</thead>
             <tbody>
               {Array.from({ length: GRID_SIZE }).map((_, rowIdx) => (
@@ -134,6 +186,8 @@ const GridBoard: React.FC = () => {
                     return (
                       <td
                         key={colIdx}
+                        data-row={rowIdx}
+                        data-col={colIdx}
                         style={{
                           padding: 0,
                           borderLeft: colIdx === MID ? '2px solid #333' : '1px solid #bbb',
@@ -145,23 +199,25 @@ const GridBoard: React.FC = () => {
                         <Button
                           variant="contained"
                           size="small"
-                          onClick={() => handleCellClick(rowIdx, colIdx)}
+                          onMouseDown={() => handleMouseDown(rowIdx, colIdx)}
+                          onMouseEnter={() => handleMouseEnter(rowIdx, colIdx)}
+                          onTouchStart={e => handleTouchStart(rowIdx, colIdx, e)}
                           sx={{
                             minWidth: CELL_SIZE,
                             minHeight: CELL_SIZE,
                             width: CELL_SIZE,
                             height: CELL_SIZE,
-                            backgroundColor: STATES[grid[rowIdx][colIdx]].color,
+                            backgroundColor: states[grid[rowIdx][colIdx]].color,
                             color: '#222',
                             border: 'none',
                             boxShadow: 'none',
                             p: 0,
                             m: 0,
                             fontSize: 11,
-                            '&:hover': { backgroundColor: STATES[grid[rowIdx][colIdx]].color },
+                            '&:hover': { backgroundColor: states[grid[rowIdx][colIdx]].color },
                           }}
                         >
-                          {grid[rowIdx][colIdx] === 0 ? '' : STATES[grid[rowIdx][colIdx]].label[0]}
+                          {grid[rowIdx][colIdx] === 0 ? '' : states[grid[rowIdx][colIdx]].label[0]}
                         </Button>
                       </td>
                     );
@@ -176,7 +232,7 @@ const GridBoard: React.FC = () => {
           </table>
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-          Click a cell to cycle through states. (Sleep, Wasted, Productive, Unavoidable)
+          Click or drag to mark cells with the selected state. Works on touch screens too.
         </Typography>
       </CardContent>
     </Card>
