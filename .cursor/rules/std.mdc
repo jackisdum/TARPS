@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+When generating ccode always include explanations as if I'm new to coding.
